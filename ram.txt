@@ -1,0 +1,74 @@
+ram simulator
+
+components:
+timing diagram
+custom command input
+custom timings
+playback with:
+- clock w/ frequency or manual stepping (1 and 1/2 clocks as well as "to next event")
+- oscilloscope display for clock and command lines
+- state machine view
+block diagrams for banks, ICs, ranks, channels etc.
+sync block diagram highlights with wireframe of DIMM
+high level language
+set motherboard memory topology, specify multiple DIMMs explicitly
+functionality other than read/write
+
+commands:
+ACT - activate row (aka page), called form idle/precharged state (max one row can be active per bank)
+	Bank - which bank is selected
+	Row address - which row to activate
+READ/RD/RDA - transfer 8 bits from activated row to bus
+	Bank - which bank is selected
+	BC - burst chop, only send first 4 bits (bus available to a different bank in 2 cycles rather than 4)
+	AP - auto-precharge, automatically precharges the bank (WRA/RDA)
+	Column - which column to process in the activated row
+WRITE/WR/WRA - write column (1 byte) from bus to activated row
+	see READ for parameters
+PRE - precharge one bank
+	Bank - bank to be precharged
+PREA - precharge all banks
+REF - refresh
+DES - deselect (no-op)
+
+timings:
+CL - CAS Latency, sometimes tCAS (exact cycles from READ/WRITE to data transmission)
+tRCD - Row-Column (or Command) Delay (min cycles from ACT to READ/WRITE)
+tRP - (Row) Precharge (min cycles from PRE to ACT)
+tRAS - RAS Active Time (min cycles from ACT to PRE), min tRCD+CL
+
+tRTP - Row to Precharge Delay (min cycles from READ/WRITE to PRE, also used for auto-precharged)
+tCCDS - Back-to-Back (B2B) CAS Delay short (min cycles between READ/WRITE and next READ/WRITE), separate banks, min tBurst
+tCCDL - Back-to-Back (B2B) CAS Delay long (min cycles between READ/WRITE and next READ/WRITE), same bank, min tBurst
+CR - Command rate (min cycles between chip select and command, 1T or 2T)
+tBurst - Burst time, always 4 cycles (8 bits, 2 bits per clock)
+
+tRC - Bank Cycle Time, time between consecutive ACT? (guessing)
+
+latencies:
+page hit: CL
+page empty: tRCD+CL
+page miss: tRP+tRCD+CL
+
+https://www.anandtech.com/show/3851
+https://en.wikipedia.org/wiki/DDR4_SDRAM
+https://en.wikipedia.org/wiki/Memory_timings
+https://www.systemverilog.io/ddr4-basics
+https://www.systemverilog.io/understanding-ddr4-timing-parameters (contains more specific timings like tRRD, tFAW, tREFI)
+https://www.systemverilog.io/ddr4-timing-parameters-cheatsheet
+https://www.techpowerup.com/articles/overclocking/AMD/memory/131/2 (more timings like tRC, tRW)
+https://www.overclock3d.net/reviews/cpu_mainboard/amd_ryzen_memory_optimisation_-_the_effect_of_trc_timings/1 (tRC)
+https://www.overclock.net/threads/perfect-ram-timing-rule-posting-resuts-of-using-the-rule-is-appreciated.1536669/
+https://www.samsung.com/semiconductor/global.semi/file/resource/2017/11/DDR4_Device_Operations_Rev11_Oct_14-0.pdf
+p28 - DDR4 SDRAM Command Description and Operation
+https://www.vikingtechnology.com/wp-content/uploads/2017/06/DDR4_ECC_Unbuffered_288_pin_DIMM_PS9MUxx72x8xxx_VP.pdf
+p7 - DIMM pinout
+p13 - DIMM measurements
+
+
+WaveDrom
+
+https://github.com/wavedrom/wavedrom
+https://wavedrom.com/editor.html
+https://github.com/wavedrom/schema/blob/master/WaveJSON.md
+https://wavedrom.com/tutorial.html

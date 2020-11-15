@@ -1,0 +1,121 @@
+<html>
+<body>
+<textarea id="commands" rows="10">
+ACT
+DES *tRCD
+RD
+DES *CL
+PRE
+DES *tRP
+ACT
+DES
+</textarea>
+<br/>
+<button onclick="update()">Update diagram</button>
+<div id="wave0"></div>
+<pre id="signaljson"></pre>
+<script src="node_modules/wavedrom/skins/default.js" type="text/javascript"></script>
+<script src="node_modules/wavedrom/wavedrom.js" type="text/javascript"></script>
+<script>
+const wave = {
+    signal: [
+        { wave: '01.0.1.0.1.0.1.0.1.0.1.0.1.0.1.0.1.0.1.0.1.0.1.0.1.0.1.0.1.0.1.0', name: 'CK', period: 0.5, phase: 0.675 },
+        //{ wave: 'pPp.............', name: 'CK', period: 2 },
+        { wave: 'x..3.x.=.x|=.x.4.x.=.x|=.x.=.x.5.x.=.x.=.x.=.x.=.x|=.x.3.x.=.x.', name: 'Command', data: "ACT DES DES RD DES DES DES PRE DES DES DES DES DES ACT DES", period: 0.5, phase: 0.125 },
+        { wave: 'x..=.x....|....=.x....|........=.x................|....=.x.....', name: 'Address', data: "0 0 0 1", period: 0.5, phase: 0.125 },
+        { wave: 'x.........|...........|.....=.=.=.=.=.=.=.=.x.....|............', name: 'DQ', data: "D0 D1 D2 D3 D4 D5 D6 D7", period: 0.5, phase: 0.125 },
+        { node: "...A...........B...........C...............F", period: 0.5, phase: -0.375 },
+        { node: "...D...........................E.......................G", period: 0.5, phase: -0.375 },
+    ],
+    edge: [
+        "A<->B tRCD",
+        "B<->C CL",
+        "C<->F tBurst",
+        "D<->E tRAS",
+        "E<->G tRP"
+    ]
+};
+WaveDrom.RenderWaveForm(0, wave, "wave", false);
+
+const timings = { CL: 5, tRCD: 5, tRP: 8, tRAS: 12 }
+const casCommands = ["RD", "RDA", "WR", "WRA"];
+
+function update() {
+    let counter = 0;
+    const deferredData = []; // e.g. data burst CL cycles after RD
+    let nextData, nextDataCk;
+    const tick = ["\u200B"];
+    const waves = {
+        CK: { wave: 'l', name: 'CK', period: 0.5, phase: 0.675 },
+        Command: { wave: "x", name: "Command", data: [], period: 0.5, phase: 0.125 },
+        DQ: { wave: "x", name: 'DQ', data: [], period: 0.5, phase: 0.125  }
+    };
+
+    function addCommand(cmd) {
+        if (casCommands.includes(cmd)) {
+            deferredData.push(
+                { wave: ".=.=", data: ["D0", "D1"], ck: counter + timings.CL },
+                { wave: ".=.=", data: ["D2", "D3"], ck: counter + timings.CL + 1 },
+                { wave: ".=.=", data: ["D4", "D5"], ck: counter + timings.CL + 2 },
+                { wave: ".=.=", data: ["D6", "D7"], ck: counter + timings.CL + 3 });
+        }
+        //cmds.push({ wave: "=.", data: cmdName, ck: counter++ });
+
+        tick.push(counter, "\u200B");
+        waves.CK.wave += "0.1.";
+        waves.Command.wave += cmd === "DES" ? "=.x." : "5.x.";
+        waves.Command.data.push(cmd);
+        if (!nextData) {
+            nextData = deferredData.shift();
+            nextDataCk = nextData ? nextData.ck : null;
+        }
+        if (nextDataCk === counter) {
+            waves.DQ.wave += nextData.wave;
+            waves.DQ.data.push(nextData.data[0], nextData.data[1]);
+            nextData = deferredData.shift();
+            nextDataCk = nextData ? nextData.ck : null;
+        } else {
+            waves.DQ.wave += ".x..";
+        }
+        counter++;
+    }
+
+    commands.value.split("\n").forEach((line, ln) => {
+        line = line.trim();
+        if (!line)
+            return;
+        const toks = line.split(/\s+/g);
+        if (toks.length > 1) {
+            const lastTok = toks[toks.length - 1];
+            if (lastTok[0] === '*') {
+                toks.pop();
+                let cmdCount = lastTok.substr(1);
+                if (cmdCount in timings)
+                    cmdCount = timings[cmdCount];
+                if (isNaN(cmdCount) || cmdCount < 1)
+                    throw new Error(`Invalid count at line ${ln}: ${line}`);
+                while (--cmdCount >= 0) {
+                    addCommand(...toks);
+                }
+            } else {
+                addCommand(...toks);
+            }
+        } else {
+            addCommand(...toks);
+        }
+    });
+
+    waves.CK.wave += "0";
+    tick.push("\u200B");
+    const waveObj = {
+        signal: [waves.CK, waves.Command, waves.DQ],
+        head: { tick: [tick.join(" ")] }
+    };
+    signaljson.textContent = JSON.stringify(waveObj, null, 2);
+    WaveDrom.RenderWaveForm(0, waveObj, "wave", false);
+}
+
+update();
+</script>
+</body>
+</html>
