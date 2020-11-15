@@ -1,12 +1,12 @@
 <html>
 <body>
-<textarea id="commands" rows="10">
+    <textarea id="commands" rows="10">
 ACT
-DES *tRCD
+wait tRCD
 RD
-DES *CL
+wait CL
 PRE
-DES *tRP
+wait tRP
 ACT
 DES
 </textarea>
@@ -37,6 +37,7 @@ const wave = {
 };
 WaveDrom.RenderWaveForm(0, wave, "wave", false);
 
+const freqMhz = 3200;
 const timings = { CL: 5, tRCD: 5, tRP: 8, tRAS: 12 }
 const casCommands = ["RD", "RDA", "WR", "WRA"];
 
@@ -44,14 +45,15 @@ function update() {
     let counter = 0;
     const deferredData = []; // e.g. data burst CL cycles after RD
     let nextData, nextDataCk;
-    const tick = ["\u200B"];
+    const ticks = [];
+    const times = [];
     const waves = {
         CK: { wave: 'l', name: 'CK', period: 0.5, phase: 0.675 },
         Command: { wave: "x", name: "Command", data: [], period: 0.5, phase: 0.125 },
         DQ: { wave: "x", name: 'DQ', data: [], period: 0.5, phase: 0.125  }
     };
 
-    function addCommand(cmd) {
+    function addCommand(cmd, args) {
         if (casCommands.includes(cmd)) {
             deferredData.push(
                 { wave: ".=.=", data: ["D0", "D1"], ck: counter + timings.CL },
@@ -59,16 +61,12 @@ function update() {
                 { wave: ".=.=", data: ["D4", "D5"], ck: counter + timings.CL + 2 },
                 { wave: ".=.=", data: ["D6", "D7"], ck: counter + timings.CL + 3 });
         }
-        //cmds.push({ wave: "=.", data: cmdName, ck: counter++ });
 
-        tick.push(counter, "\u200B");
+        ticks.push(counter, "\u200B");
+        times.push((counter * 1000 / 3200).toFixed(1) + "ns", "\u200B");
         waves.CK.wave += "0.1.";
         waves.Command.wave += cmd === "DES" ? "=.x." : "5.x.";
         waves.Command.data.push(cmd);
-        if (!nextData) {
-            nextData = deferredData.shift();
-            nextDataCk = nextData ? nextData.ck : null;
-        }
         if (nextDataCk === counter) {
             waves.DQ.wave += nextData.wave;
             waves.DQ.data.push(nextData.data[0], nextData.data[1]);
@@ -77,6 +75,13 @@ function update() {
         } else {
             waves.DQ.wave += ".x..";
         }
+        if (nextDataCk && nextDataCk <= counter) {
+            console.error(`Data burst overlap! (time ${nextDataCk} to ${counter + 1})`);
+            while (nextDataCk <= counter) {
+                nextData = deferredData.shift();
+                nextDataCk = nextData ? nextData.ck : null;
+            }
+        }
         counter++;
     }
 
@@ -84,32 +89,37 @@ function update() {
         line = line.trim();
         if (!line)
             return;
-        const toks = line.split(/\s+/g);
-        if (toks.length > 1) {
-            const lastTok = toks[toks.length - 1];
-            if (lastTok[0] === '*') {
-                toks.pop();
-                let cmdCount = lastTok.substr(1);
-                if (cmdCount in timings)
-                    cmdCount = timings[cmdCount];
-                if (isNaN(cmdCount) || cmdCount < 1)
-                    throw new Error(`Invalid count at line ${ln}: ${line}`);
-                while (--cmdCount >= 0) {
-                    addCommand(...toks);
+        const args = line.split(/\s+/g);
+        const cmd = args.shift();
+
+        if (!nextData) {
+            nextData = deferredData.shift();
+            nextDataCk = nextData ? nextData.ck : null;
+        }
+
+        if (cmd === "wait") {
+            let time = args[0];
+            if (isNaN(time)) {
+                time = timings[time];
+                if (isNaN(time)) {
+                    console.error(`Invalid wait argument: ${args[0]}`);
+                    time = 0;
                 }
-            } else {
-                addCommand(...toks);
+            }
+            time = Math.floor(time);
+            for (let i = 1; i < time; i++) {
+                addCommand("DES", []); // emit time-1 DES
             }
         } else {
-            addCommand(...toks);
+            addCommand(cmd, args);
         }
     });
 
     waves.CK.wave += "0";
-    tick.push("\u200B");
     const waveObj = {
         signal: [waves.CK, waves.Command, waves.DQ],
-        head: { tick: [tick.join(" ")] }
+        head: { tick: ["\u200B " + ticks.join(" ") + " \u200B"] },
+        foot: { tick: ["\u200B " + times.join(" ") + " \u200B"] }
     };
     signaljson.textContent = JSON.stringify(waveObj, null, 2);
     WaveDrom.RenderWaveForm(0, waveObj, "wave", false);
