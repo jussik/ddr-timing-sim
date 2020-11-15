@@ -1,40 +1,60 @@
 (() => {
     const casCommands = ["RD", "RDA", "WR", "WRA"];
 
+    const posSuffix = ["", "k", "M", "G", "T", "P"];
+    const negSuffix = ["m", "\u00b5", "n", "p"];
+    window.formatSi = function formatSi(n) {
+        if (typeof(n) !== "number")
+            return n;
+        if (n === 0)
+            return "0";
+        let logDivisor = Math.floor(Math.log10(n) / 3);
+        if (logDivisor >= 0) {
+            logDivisor = Math.min(logDivisor, posSuffix.length - 1);
+            return parseFloat((n / Math.pow(10, 3 * logDivisor)).toFixed(1)) + posSuffix[logDivisor];
+        } else {
+            logDivisor = 0 - logDivisor;
+            if (logDivisor > negSuffix.length)
+                return "0";
+            return parseFloat((n * Math.pow(10, 3 * logDivisor)).toFixed(1)) + negSuffix[logDivisor - 1];
+        }
+    }
+
+    function cyclesToTime(n, freqMhz) {
+        if (typeof(n) !== "number")
+            return n;
+        return formatSi(n / (freqMhz * 1000000)) + "s";
+    }
+
+    let state = null;
+
     window.update = function update() {
         const freqMhz = +i_CK.value;
+
+        const ticks = [];
+        const waves = { CK: [], Command: [], DQ: [] };
+        state = { waves, ticks, freqMhz };
+
+        o_CK.textContent = freqMhz * 2 + "MT/s";
         const timings = {}; // map timing names to times, e.g. {CL:14,tRCD:16,...}
-
-        function cyclesToTime(n) {
-            return parseFloat((n * 1000 / freqMhz).toFixed(1)) + "ns";
-        }
-
-        o_CK.textContent = freqMhz * 2 + " MT";
         for (let e of document.getElementsByClassName("timing")) {
             let n = +e.value;
             timings[e.name] = n;
-            window["o_" + e.name].textContent = cyclesToTime(n);
+            window["o_" + e.name].textContent = cyclesToTime(n, freqMhz);
         }
 
         let nextData, nextDataCk;
         const deferredData = []; // e.g. data burst CL cycles after RD
-
+        // increment the nextData pointer
         function shiftData() {
             nextData = deferredData.shift();
             nextDataCk = nextData ? nextData.ck : null;
         }
 
-        const ticks = [];
-        const times = [];
-        const waves = {
-            CK: { wave: [] },
-            Command: { wave: [], data: [] },
-            DQ: { wave: [], data: [] }
-        };
-
         let ckCounter = 0;
         let dataCounter = 0;
 
+        // add a single command to the state
         function emitCommand(cmd, args = {}) {
             if (casCommands.includes(cmd)) {
                 deferredData.push(
@@ -45,28 +65,25 @@
             }
 
             ticks.push(ckCounter);
-            times.push(cyclesToTime(ckCounter));
-            waves.CK.wave.push(".1.0");
-            waves.Command.data.push(cmd);
+            waves.CK.push(".1.0");
+            const command = { data: cmd };
+            waves.Command.push(command);
             if (cmd === "DES" && args.warp) {
                 ticks.push("\u21DD");
-                times.push("\u21DD");
-                waves.Command.wave.push("=.x|");
-                waves.DQ.wave.push(".x.|");
+                command.wave = "=.x|";
+                waves.DQ.push(".x.|");
                 if (nextDataCk === ckCounter) {
                     console.error(`Warp during data burst! (time ${ckCounter})`);
                 }
             } else {
                 ticks.push("\u200B");
-                times.push("\u200B");
-                waves.Command.wave.push(cmd === "DES" ? "=.x." : "5.x.");
+                command.wave = cmd === "DES" ? "=.x." : "5.x.";
                 if (nextDataCk === ckCounter) {
-                    waves.DQ.wave.push(".=.=");
-                    waves.DQ.data.push("D" + nextData.offset, "D" + (nextData.offset + 1));
+                    waves.DQ.push({ wave: ".=.=", data: [`D${nextData.offset}`, `D${nextData.offset + 1}`] });
                     shiftData();
                     dataCounter += 2;
                 } else {
-                    waves.DQ.wave.push(".x..");
+                    waves.DQ.push(".x..");
                 }
             }
 
@@ -83,6 +100,7 @@
                 ckCounter++;
         }
 
+        // wait a specified number of cycles
         function wait(time) {
             const origTime = time;
             if (isNaN(time)) {
@@ -123,18 +141,19 @@
             }
         }
 
+        // fill state from command text
         commands.value.split("\n").forEach((line, ln) => {
             line = line.trim();
             if (!line)
                 return;
             const args = line.split(/\s+/g);
-            const cmd = args.shift();
+            const cmd = args.shift().toUpperCase();
 
             if (!nextData) {
                 shiftData();
             }
 
-            if (cmd === "wait") {
+            if (cmd === "WAIT") {
                 wait(args[0]);
             } else {
                 emitCommand(cmd, args);
@@ -153,27 +172,77 @@
             }
         }
 
-        const waveObj = {
-            signal: [
-                { name: 'CK', wave: 'l.' + waves.CK.wave.join(""), period: 0.5, phase: 0.675 },
-                { name: "Command", wave: "x" + waves.Command.wave.join(""), data: waves.Command.data, period: 0.5, phase: 0.125 },
-                { name: 'DQ', wave: "x" + waves.DQ.wave.join(""), data: waves.DQ.data, period: 0.5, phase: 0.125 }
-            ],
-            head: { tick: ["\u200B " + ticks.join(" ") + " \u200B"] },
-            foot: { tick: ["\u200B " + times.join(" ") + " \u200B"] }
-        };
-        signaljson.textContent = JSON.stringify(waveObj, null, 2);
-        WaveDrom.RenderWaveForm(0, waveObj, "wave", false);
-
-        const suffix = ["", "K", "M", "G", "T"];
-        function formatSi(n) {
-            const logDivisor = Math.min(Math.floor(Math.log10(n) / 3), suffix.length - 1);
-            return parseFloat((n / Math.pow(10, 3 * logDivisor)).toFixed(1)) + suffix[logDivisor];
-        }
-
         const bitsPerSecond = dataCounter * freqMhz * 1000000 / ckCounter;
-        summary.textContent = `${formatSi(dataCounter)}b in ${cyclesToTime(ckCounter)}, ${formatSi(bitsPerSecond)}b/s`;
+        summary.textContent = `${formatSi(dataCounter)}b in ${cyclesToTime(ckCounter, freqMhz)}, ${formatSi(bitsPerSecond)}b/s`;
+
+        render();
+    }
+
+    function render() {
+        if (!state)
+            return;
+
+        ({ waves, ticks, freqMhz } = state);
+
+        waveContainer.innerHTML = "";
+        const chunkLength = Math.floor((form.clientWidth - 120) / 80); // 120px for headings, 80px for each cycle
+        const chunkCount = Math.ceil(waves.CK.length / chunkLength);
+        let cutOffData = null;
+        for (let waveIndex = 0; waveIndex < chunkCount; waveIndex++) {
+            const signal = [];
+            const startIndex = chunkLength * waveIndex;
+            const endIndex = startIndex + chunkLength;
+            for (let waveName in waves) {
+                let chunk = waves[waveName].slice(startIndex, endIndex);
+                let wave = chunk.map(o => o.wave || o).join("");
+                let waveStart, data, phase;
+                if (waveName === "CK") {
+                    waveStart = "l.";
+                    phase = 0.65;
+                } else {
+                    wave = chunk.map(o => o.wave || o).join("");
+                    phase = 0.15;
+                    data = chunk.filter(d => d.data).map(o => o.data).flat();
+                    waveStart = "x";
+
+                    if (waveName === "DQ") {
+                        // handle data bursts split into separate chunks
+                        if (cutOffData) {
+                            // insert bit cut off from previous chunk
+                            waveStart = "=";
+                            data.unshift(cutOffData);
+                            cutOffData = null;
+                        }
+
+                        if (wave.slice(-1) === "=") {
+                            // move last bit to the next chunk
+                            cutOffData = data[data.length - 1];
+                        }
+                    }
+                }
+                signal.push({ name: waveName, wave: waveStart + wave, data: data, period: 0.5, phase: phase });
+            }
+
+            const chunkTicks = ticks.slice(startIndex * 2, endIndex * 2);
+            const waveObj = {
+                signal: signal,
+                head: { tick: ["\u200B " + chunkTicks.map(formatSi).join(" ") + " \u200B"] },
+                foot: { tick: ["\u200B " + chunkTicks.map(t => cyclesToTime(t, freqMhz)).join(" ") + " \u200B"] }
+            };
+
+            let waveElem = document.createElement("div");
+            waveElem.id = "wave" + waveIndex;
+            waveElem.classList.add("wave");
+            waveContainer.appendChild(waveElem);
+            WaveDrom.RenderWaveForm(waveIndex, waveObj, "wave", false);
+        }
     }
 
     update();
+
+    let renderTimeout;
+    window.onresize = function() {
+        clearTimeout(renderTimeout);
+        renderTimeout = setTimeout(render, 200);
+    }
 })();
