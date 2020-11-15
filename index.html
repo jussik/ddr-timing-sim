@@ -16,15 +16,36 @@ DES
 </textarea>
     <br/>
     <button onclick="update()" type="button">Update diagram</button>
-    <br/>
-    <label>Clock <input type="number" id="clockFreq" value="1600" onchange="update()" min="1"/> MHz</label>
-    <br/>
-    <label>CL <input type="number" class="timing" name="CL" value="14" onchange="update()" min="1"/></label>
-    <label>tRCD <input type="number" class="timing" name="tRCD" value="14" onchange="update()" min="1"/></label>
-    <label>tRP <input type="number" class="timing" name="tRP" value="14" onchange="update()" min="1"/></label>
-    <label>tRAS <input type="number" class="timing" name="tRAS" value="34" onchange="update()" min="1"/></label>
+    <table>
+        <thead>
+        <tr>
+            <th><label for="i_CK">Clock (MHz)</label></th>
+            <th><label for="i_CL">CL</label></th>
+            <th><label for="i_tRCD">tRCD</label></th>
+            <th><label for="i_tRP">tRP</label></th>
+            <th><label for="i_tRAS">tRAS</label></th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td><input type="number" id="i_CK" value="1600" onchange="update()" min="1" /></td>
+            <td><input type="number" class="timing" id="i_CL" name="CL" value="14" onchange="update()" min="1" /></td>
+            <td><input type="number" class="timing" id="i_tRCD" name="tRCD" value="14" onchange="update()" min="1" /></td>
+            <td><input type="number" class="timing" id="i_tRP" name="tRP" value="14" onchange="update()" min="1" /></td>
+            <td><input type="number" class="timing" id="i_tRAS" name="tRAS" value="34" onchange="update()" min="1" /></td>
+        </tr>
+        <tr>
+            <td id="o_CK"></td>
+            <td id="o_CL"></td>
+            <td id="o_tRCD"></td>
+            <td id="o_tRP"></td>
+            <td id="o_tRAS"></td>
+        </tr>
+        </tbody>
+    </table>
 </form>
 <div id="wave0"></div>
+<div id="summary"></div>
 <pre id="signaljson"></pre>
 <script src="node_modules/wavedrom/skins/default.js" type="text/javascript"></script>
 <script src="node_modules/wavedrom/wavedrom.js" type="text/javascript"></script>
