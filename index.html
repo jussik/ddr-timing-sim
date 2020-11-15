@@ -1,7 +1,10 @@
 <html>
+<head>
+    <title>DDR4 Timing simulator</title>
+</head>
 <body>
 <form>
-<textarea id="commands" rows="10">
+    <textarea id="commands" rows="10">
 ACT
 wait tRCD
 RD
@@ -11,15 +14,15 @@ wait tRP
 ACT
 DES
 </textarea>
-<br/>
-<label>Clock <input type="number" id="clockFreq" value="1600"/> MHz</label>
-<br/>
-<label>CL <input type="number" class="timing" name="CL" value="5"/></label>
-<label>tRCD <input type="number" class="timing" name="tRCD" value="5"/></label>
-<label>tRP <input type="number" class="timing" name="tRP"  value="8"/></label>
-<label>tRAS <input type="number" class="timing" name="tRAS"  value="12"/></label>
-<br/>
-<button onclick="update()" type="button">Update diagram</button>
+    <br/>
+    <label>Clock <input type="number" id="clockFreq" value="1600" onchange="update()" min="1"/> MHz</label>
+    <br/>
+    <label>CL <input type="number" class="timing" name="CL" value="5" onchange="update()" min="1"/></label>
+    <label>tRCD <input type="number" class="timing" name="tRCD" value="5" onchange="update()" min="1"/></label>
+    <label>tRP <input type="number" class="timing" name="tRP" value="10" onchange="update()" min="1"/></label>
+    <label>tRAS <input type="number" class="timing" name="tRAS" value="15" onchange="update()" min="1"/></label>
+    <br/>
+    <button onclick="update()" type="button">Update diagram</button>
 </form>
 <div id="wave0"></div>
 <pre id="signaljson"></pre>
@@ -30,7 +33,7 @@ DES
 
     function update() {
         const freqMhz = +clockFreq.value;
-        // map timing names to times
+        // map timing names to times, e.g. {CL:14,tRCD:16,...}
         const timings = [].reduce.call(
             document.getElementsByClassName("timing"),
             (o, e) => (o[e.name] = +e.value, o),
@@ -38,6 +41,7 @@ DES
 
         let nextData, nextDataCk;
         const deferredData = []; // e.g. data burst CL cycles after RD
+
         function shiftData() {
             nextData = deferredData.shift();
             nextDataCk = nextData ? nextData.ck : null;
@@ -46,13 +50,14 @@ DES
         const ticks = [];
         const times = [];
         const waves = {
-            CK: { wave: 'l', name: 'CK', period: 0.5, phase: 0.675 },
-            Command: { wave: "x", name: "Command", data: [], period: 0.5, phase: 0.125 },
-            DQ: { wave: "x", name: 'DQ', data: [], period: 0.5, phase: 0.125 }
+            CK: { wave: [] },
+            Command: { wave: [], data: [] },
+            DQ: { wave: [], data: [] }
         };
 
         let counter = 0;
-        function addCommand(cmd, args) {
+
+        function emitCommand(cmd, args = {}) {
             if (casCommands.includes(cmd)) {
                 deferredData.push(
                     { offset: 0, ck: counter + timings.CL },
@@ -61,25 +66,81 @@ DES
                     { offset: 6, ck: counter + timings.CL + 3 });
             }
 
-            ticks.push(counter, "\u200B");
-            times.push((counter * 1000 / freqMhz).toFixed(1) + "ns", "\u200B");
-            waves.CK.wave += "0.1.";
-            waves.Command.wave += cmd === "DES" ? "=.x." : "5.x.";
+            ticks.push(counter);
+            times.push((counter * 1000 / freqMhz).toFixed(1) + "ns");
+            waves.CK.wave.push(".1.0");
             waves.Command.data.push(cmd);
-            if (nextDataCk === counter) {
-                waves.DQ.wave += ".=.=";
-                waves.DQ.data.push("D" + nextData.offset, "D" + (nextData.offset + 1));
-                shiftData();
+            if (cmd === "DES" && args.warp) {
+                ticks.push("\u21DD");
+                times.push("\u21DD");
+                waves.Command.wave.push("=.x|");
+                waves.DQ.wave.push(".x.|");
+                if (nextDataCk === counter) {
+                    console.error(`Warp during data burst! (time ${counter})`);
+                }
             } else {
-                waves.DQ.wave += ".x..";
+                ticks.push("\u200B");
+                times.push("\u200B");
+                waves.Command.wave.push(cmd === "DES" ? "=.x." : "5.x.");
+                if (nextDataCk === counter) {
+                    waves.DQ.wave.push(".=.=");
+                    waves.DQ.data.push("D" + nextData.offset, "D" + (nextData.offset + 1));
+                    shiftData();
+                } else {
+                    waves.DQ.wave.push(".x..");
+                }
             }
-            if (nextDataCk && nextDataCk <= counter) {
+
+            if (nextData && nextDataCk <= counter) {
                 console.error(`Data burst overlap! (time ${nextDataCk} to ${counter + 1})`);
                 while (nextDataCk <= counter) {
                     shiftData();
                 }
             }
-            counter++;
+            if (args.counter)
+                counter = args.counter;
+            else
+                counter++;
+        }
+
+        function wait(time) {
+            const origTime = time;
+            if (isNaN(time)) {
+                time = timings[time];
+                if (isNaN(time)) {
+                    console.error(`Invalid wait argument: ${origTime}`);
+                    time = 0;
+                }
+            }
+            time = Math.floor(time);
+
+            if (time > 1) {
+                const finalDes = counter + time - 2; // generate (time - 1) DES commands
+                while (counter < finalDes) {
+                    let waitLeft = finalDes - counter;
+                    if (waitLeft < 2) {
+                        // short wait, skip warp
+                        while (counter < finalDes) {
+                            emitCommand("DES");
+                        }
+                    } else if (!nextData) {
+                        // no upcoming data, easy warp
+                        emitCommand("DES", { warp: true, counter: finalDes });
+                    } else {
+                        // upcoming data
+                        let minWarp = counter + 2;
+                        let nextTarget = Math.min(nextDataCk, finalDes);
+                        if (nextTarget >= minWarp) {
+                            // warp as far as possible
+                            emitCommand("DES", { warp: true, counter: nextTarget });
+                        } else {
+                            // warp not possible, try again next cycle
+                            emitCommand("DES");
+                        }
+                    }
+                }
+                emitCommand("DES");
+            }
         }
 
         commands.value.split("\n").forEach((line, ln) => {
@@ -94,26 +155,18 @@ DES
             }
 
             if (cmd === "wait") {
-                let time = args[0];
-                if (isNaN(time)) {
-                    time = timings[time];
-                    if (isNaN(time)) {
-                        console.error(`Invalid wait argument: ${args[0]}`);
-                        time = 0;
-                    }
-                }
-                time = Math.floor(time);
-                for (let i = 1; i < time; i++) {
-                    addCommand("DES", []); // emit time-1 DES
-                }
+                wait(args[0]);
             } else {
-                addCommand(cmd, args);
+                emitCommand(cmd, args);
             }
         });
 
-        waves.CK.wave += "0";
         const waveObj = {
-            signal: [waves.CK, waves.Command, waves.DQ],
+            signal: [
+                { name: 'CK', wave: 'l.' + waves.CK.wave.join(""), period: 0.5, phase: 0.675 },
+                { name: "Command", wave: "x" + waves.Command.wave.join(""), data: waves.Command.data, period: 0.5, phase: 0.125 },
+                { name: 'DQ', wave: "x" + waves.DQ.wave.join(""), data: waves.DQ.data, period: 0.5, phase: 0.125 }
+            ],
             head: { tick: ["\u200B " + ticks.join(" ") + " \u200B"] },
             foot: { tick: ["\u200B " + times.join(" ") + " \u200B"] }
         };
